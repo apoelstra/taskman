@@ -117,11 +117,20 @@ get_active_block() {
     # Check if block has start_time (indicating it's a valid block)
     local start_time
     start_time=$(echo "$json_part" | jq -r '.start_time // empty')
-    if [[ -n "$start_time" ]]; then
-        echo "$json_part"
-    else
+    if [[ -z "$start_time" ]]; then
         echo "null"
+        return
     fi
+    
+    # Check if block has expired (current time > start_time + duration)
+    local is_expired
+    is_expired=$(echo "$json_part" | jq 'now > ((.start_time | fromdateiso8601) + .duration)')
+    if [[ "$is_expired" == "true" ]]; then
+        echo "null"
+        return
+    fi
+    
+    echo "$json_part"
 }
 
 # Function to check if block is paused
