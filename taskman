@@ -46,7 +46,7 @@ expand_path() {
 
 # Function to get current timestamp in UTC
 get_utc_timestamp() {
-    date -u +"%Y-%m-%dT%H:%M:%S.%3NZ"
+    date -u +"%Y-%m-%dT%H:%M:%SZ"
 }
 
 # Function to get local date for block numbering
