@@ -4,93 +4,190 @@ This tool uses `rofi` in dmenu mode to provide a pop-up menu allowing the user t
 tasks done during 25-minute blocks. The blocks are tracked using `jj` and the tasks are
 tracked by attaching specially-formatted commit descriptions to these blocks.
 
-Each block traks the following data:
+## Data Model
 
-* The total time of the block (which is set to 25 minutes at the start of the block,
-  though this value may be configured).
-* A list of tasks that were completed or worked on during the block, along with a
-  timestamp of when they were started.
-* The timestamp when the block was started.
-* A list of timestamps when the block was paused, along with the pause duration if
-  the block has since been un-paused.
+Each block tracks the following data in a JSON structure stored in the commit message:
 
-From this data, it is possible to look at the latest block and determine:
+```json
+{
+  "start_time": "2025-06-11T14:30:00.000Z",
+  "duration": 1500,
+  "tasks": [
+    {
+      "description": "Review pull request #123",
+      "start_time": "2025-06-11T14:30:00.000Z"
+    },
+    {
+      "description": "Write unit tests",
+      "start_time": "2025-06-11T14:45:00.000Z"
+    }
+  ],
+  "pauses": [
+    {
+      "start_time": "2025-06-11T14:40:00.000Z",
+      "end_time": "2025-06-11T14:42:00.000Z"
+    }
+  ]
+}
+```
 
-* Whether the block is currently paused and for how long.
-* How many times the block has been paused and for how long.
-* What tasks were worked on and for how long.
-* Whether the block is currently active and how much time is remaining.
+Fields:
+* `start_time`: ISO 8601 timestamp in UTC when the block was started
+* `duration`: Block duration in seconds (defaults to 1500 = 25 minutes)
+* `tasks`: Array of tasks worked on during the block
+* `pauses`: Array of pause periods with start and end times (end_time is null for active pauses)
 
-To compute the currently-remaining time, the software simply compares the current time
-to the start time of the block, subtracting the total pause lengths (if the block is
-currently paused this is treated as a pause that ends at the current time).
+## Time Calculations
 
-The location of the repo is configurable but defaults to
+All timestamps use UTC except for the daily block numbering reset which occurs at 00:00 in the user's local timezone.
 
-# Configuration
+Task durations are calculated from when a task starts until either:
+1. The next task starts, or
+2. The block ends (either by completion, pause, or cancellation)
 
-The tool uses a configuration file at $HOME/.config/taskman/config.json which specifies
+When a block is paused, the current task (if any) continues until the pause begins.
 
-* The duration of blocks (defaults to 25 minutes)
-* The location of the `jj` repo to add blocks to.
-* The default "summary revset" which by default contains all blocks since 00:00 on
-  the most recent Monday. (Or, if that is too difficult to implement, all blocks
-  in the last 168 hours.)
+## Configuration
 
-If this file does not exist, the software should offer to create it with sensible
-defaults, and tell the user how to edit it.
+The tool uses a configuration file at `$HOME/.config/taskman/config.json`:
 
-# CLI User Interface
+```json
+{
+  "block_duration": 1500,
+  "repo_path": "$HOME/code/taskman-blocks",
+  "summary_revset": "all() & committers(after:\"7 days ago\")",
+  "timezone": "local"
+}
+```
 
-The CLI interface exposes the following commands:
+Fields:
+* `block_duration`: Duration of blocks in seconds (default: 1500 = 25 minutes)
+* `repo_path`: Path to the jj repository (default: `$HOME/code/taskman-blocks`)
+* `summary_revset`: Default jj revset for summary command (default: last 7 days)
+* `timezone`: Timezone for daily reset, "local" or IANA timezone name (default: "local")
 
-* `summary` takes a jj revset and outputs a summary of all the individual blocks in
-  the revset, as well as an aggregate combination of all the blocks' data (total number
-  of tasks done, total time, total number of blocks, etc). If two tiasks in different
-  blocks are the same they should be combined in the aggregate. All output is in JSON.
-  The output should include a boolean `active` which indicates whether the block's 25
-  minutes are up.
+If this file does not exist, the CLI tool should output an error message explaining how to create it with the default values shown above.
 
-  If no revset is specified it uses the "summary revset" specified in the configuration
-  file.
-* `start` begins a new block. If a block is currently in progress then this yields an
-  error and `restart` must be used. (When accessed through the rofi menu it is simply
-  not available.) This is implemented simply as `jj new` followed by `jj describe`
-  setting the first line of the commit message to "Block N of <date>" and the remainder
-  of the commit message to a pretty-printed JSON blob containing the data of the block.
-* `pause` pauses the block.
-* `cancel` cancels the current block (by abandoning its jj commit)
-* `restart` is the same as `cancel` followed by `start`.
-* `status` is the same as `summary @`, i.e. it gives a summary of the current or most
-  recent block.
-* `task-start` begins a new task and takes a text description of the block.
+## Error Handling
 
-In the CLI interface all output should be in JSON.
+* CLI tool: If jj commands fail or configuration is invalid, output a JSON error object with `{"error": "description of what failed"}`
+* Rofi interface: Log errors to `$HOME/.config/taskman/errors.log` in the format: `[ISO 8601 timestamp] ERROR: description`
 
-# Rofi User Interface
+Do not attempt retries, automatic fixes, or degraded operation modes.
 
-Separately there is a user interface based on `rofi -dmenu` which acts as follows:
+## CLI User Interface
 
-When invoked, it gives the user a list of actions. If no block is currently active, these
-actions are:
+All CLI output is in JSON format. Commands:
 
-* `start` which simply starts a new block.
-* `copy-status` which outputs the output of status into the clipboard using `xsel`
-* `copy-summary` which outputs the output of summary into the clipboard using `xsel`
+### `summary [revset]`
+Outputs summary of blocks matching the revset (defaults to config's `summary_revset`).
 
-If a block is currently active, the actions are:
+Output format:
+```json
+{
+  "blocks": [
+    {
+      "commit_id": "abc123",
+      "block_number": 1,
+      "date": "2025-06-11",
+      "start_time": "2025-06-11T14:30:00.000Z",
+      "duration": 1500,
+      "active": true,
+      "paused": false,
+      "time_remaining": 1200,
+      "tasks": [
+        {
+          "description": "Review pull request #123",
+          "start_time": "2025-06-11T14:30:00.000Z",
+          "total_duration": 600,
+          "switch_count": 1
+        }
+      ],
+      "total_pause_time": 120
+    }
+  ],
+  "aggregate": {
+    "total_blocks": 1,
+    "total_time": 1500,
+    "total_active_time": 1380,
+    "total_pause_time": 120,
+    "tasks": [
+      {
+        "description": "Review pull request #123",
+        "total_duration": 600,
+        "earliest_start": "2025-06-11T14:30:00.000Z",
+        "switch_count": 1
+      }
+    ]
+  }
+}
+```
 
-* `task-start` leads to a second rofi menu to type an action (all tasks in the
-  output of `summary` should be shown as menu options to help rofi autocomplete them
-  in case the user is continuing)
-* `pause` pauses the current block with no further output.
-* `cancel` cancels the current block with no further output.
-* `restart` restarts the current block with no further output.
-* `copy-status` which outputs the output of status into the clipboard using `xsel`
-* `copy-summary` which outputs the output of summary into the clipboard using `xsel`
+### `start`
+Begins a new block. Fails if a block is currently active.
 
-Note that because rofi does not have a sensible place to put output, we replace the
-output commands with ones that use `xsel` to put stuff into the X buffer.
+Implementation:
+1. Run `jj new` to create new commit
+2. Run `jj describe` with message: "Block N of YYYY-MM-DD\n\n{json_data}"
+   - N is sequential within the day (starting from 1 at 00:00 local time)
+   - Date is in local timezone
+   - json_data is the initial block data structure
+
+### `pause`
+Pauses the current active block by adding a pause entry with current timestamp.
+
+### `unpause`
+Unpauses the current block by setting the end_time of the most recent pause.
+
+### `cancel`
+Cancels the current block using `jj abandon @`.
+
+### `restart`
+Equivalent to `cancel` followed by `start`.
+
+### `status`
+Equivalent to `summary @` (summary of current/most recent block).
+
+### `task-start <description>`
+Begins a new task in the current active block. Fails if no block is active or if block is paused.
+
+## Rofi User Interface
+
+The rofi interface is implemented as a separate script that calls the CLI tool and uses `jq` to parse JSON output.
+
+### When no block is active:
+* `start` - calls CLI `start`
+* `copy-status` - calls CLI `status` and pipes output to `xsel -b`
+* `copy-summary` - calls CLI `summary` and pipes output to `xsel -b`
+
+### When block is active and not paused:
+* `task-start` - shows second rofi menu with:
+  - All unique task descriptions from `summary` output as autocomplete options
+  - User can type new description or select existing one
+  - Calls CLI `task-start <description>`
+* `pause` - calls CLI `pause`
+* `cancel` - calls CLI `cancel`
+* `restart` - calls CLI `restart`
+* `copy-status` - calls CLI `status` and pipes output to `xsel -b`
+* `copy-summary` - calls CLI `summary` and pipes output to `xsel -b`
+
+### When block is paused:
+* `unpause` - calls CLI `unpause`
+* `cancel` - calls CLI `cancel`
+* `copy-status` - calls CLI `status` and pipes output to `xsel -b`
+
+## Block Numbering
+
+Blocks are numbered sequentially within each day, starting from 1. The day boundary is determined by 00:00 in the user's local timezone (or the timezone specified in config). Block numbers reset to 1 at the start of each new day.
+
+The commit message format is: "Block N of YYYY-MM-DD" where the date is in the local timezone.
+
+## Task Aggregation
+
+When multiple tasks have identical descriptions (either within a single block or across multiple blocks in a summary), they are aggregated:
+* `total_duration`: Sum of all durations for that task
+* `earliest_start`: Earliest start time across all instances
+* `switch_count`: Number of times the task was started (i.e., number of task instances)
 
 
 
