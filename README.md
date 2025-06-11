@@ -2,6 +2,10 @@
 
 A Pomodoro-style task tracking system that uses `jj` (Jujutsu) version control to store time blocks and tasks in commit messages. Each 25-minute work block is tracked as a commit with JSON data containing tasks, timestamps, and pause information.
 
+I maintain a git repository for tracking my time in 25-minute blocks. Each commit has empty contents (or rather, updates to my todo list or working notes, which usually have an empty diff) and its description has a structured list of everything I did during that 25-minute block.
+
+This is a standard "pomodoro timer" technique based loosely on David Cain's book ["How To Do Things"](https://www.raptitude.com/2021/11/how-to-do-things/).
+
 ## Overview
 
 Taskman helps you track focused work sessions by:
