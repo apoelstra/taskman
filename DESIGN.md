@@ -55,7 +55,7 @@ The tool uses a configuration file at `$HOME/.config/taskman/config.json`:
 {
   "block_duration": 1500,
   "repo_path": "$HOME/code/taskman-blocks",
-  "summary_revset": "all() & committers(after:\"7 days ago\")",
+  "summary_revset": "all() & committer_date(after:\"7 days ago\")",
   "timezone": "local"
 }
 ```
