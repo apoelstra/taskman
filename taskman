@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
-set -x
 
 # Default configuration
 DEFAULT_CONFIG="{\"block_duration\": 1500, \"repo_path\": \"$HOME/code/taskman-blocks\", \"summary_revset\": \"all() & committer_date(after:\\\"7 days ago\\\")\", \"timezone\": \"local\"}"
@@ -233,7 +232,7 @@ cmd_summary() {
     
     # Get list of change IDs first to debug
     local change_ids_output
-    change_ids_output=$(jj log --no-graph --template 'change_id' -r "$revset" 2>&1)
+    change_ids_output=$(jj log --no-graph --template 'change_id ++ "\n"' -r "$revset" 2>&1)
     local jj_exit_code=$?
     
     if [[ $jj_exit_code -ne 0 ]]; then
