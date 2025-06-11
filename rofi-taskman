@@ -44,8 +44,8 @@ handle_task_start() {
         summary_stderr=$(cat /tmp/taskman_summary_error.$$ 2>/dev/null || echo "No error details available")
         rm -f /tmp/taskman_summary_error.$$
         log_error "Failed to get summary for task autocomplete: $summary_stderr"
-        # Continue anyway - we can still allow manual task entry
-        summary_output=""
+        # Fall back to using status data we already have
+        summary_output="$status_output"
     else
         rm -f /tmp/taskman_summary_error.$$
     fi
