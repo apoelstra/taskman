@@ -87,7 +87,7 @@ copy-summary"
     
     case "$choice" in
         "start")
-            result=""
+            local result
             if ! result=$($TASKMAN_CLI start 2>&1); then
                 log_error "Failed to start block: $result"
                 exit 1
