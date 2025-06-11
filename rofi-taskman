@@ -44,13 +44,17 @@ handle_task_start() {
         summary_stderr=$(cat /tmp/taskman_summary_error.$$ 2>/dev/null || echo "No error details available")
         rm -f /tmp/taskman_summary_error.$$
         log_error "Failed to get summary for task autocomplete: $summary_stderr"
-        return 1
+        # Continue anyway - we can still allow manual task entry
+        summary_output=""
+    else
+        rm -f /tmp/taskman_summary_error.$$
     fi
-    rm -f /tmp/taskman_summary_error.$$
     
     # Get existing task descriptions
-    local existing_tasks
-    existing_tasks=$(get_task_descriptions "$summary_output")
+    local existing_tasks=""
+    if [[ -n "$summary_output" ]]; then
+        existing_tasks=$(get_task_descriptions "$summary_output")
+    fi
     
     # Show rofi with existing tasks as options, but allow custom input
     local task_description
