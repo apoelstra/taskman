@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-TASKMAN_CLI="taskman"
+TASKMAN_CLI="$HOME/bin/taskman"
 CONFIG_DIR="$HOME/.config/taskman"
 ERROR_LOG="$CONFIG_DIR/errors.log"
 
