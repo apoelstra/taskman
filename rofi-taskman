@@ -66,14 +66,14 @@ handle_task_start() {
 }
 
 # Get current status
-status_output
+local status_output
 if ! status_output=$($TASKMAN_CLI status 2>&1); then
     log_error "Failed to get status: $status_output"
     exit 1
 fi
 
 # Parse status to determine current state
-current_block
+local current_block
 current_block=$(echo "$status_output" | jq -r '.blocks[0] // null')
 
 if [[ "$current_block" == "null" ]]; then
@@ -82,7 +82,7 @@ if [[ "$current_block" == "null" ]]; then
 copy-status
 copy-summary"
     
-    choice
+    local choice
     choice=$(show_menu "$options" "No active block")
     
     case "$choice" in
@@ -97,7 +97,7 @@ copy-summary"
             copy_to_clipboard "$status_output"
             ;;
         "copy-summary")
-            summary_output=""
+            local summary_output
             if ! summary_output=$($TASKMAN_CLI summary 2>&1); then
                 log_error "Failed to get summary: $summary_output"
                 exit 1
@@ -115,19 +115,19 @@ else
 cancel
 copy-status"
         
-        choice
+        local choice
         choice=$(show_menu "$options" "Block paused")
         
         case "$choice" in
             "unpause")
-                result=""
+                local result
                 if ! result=$($TASKMAN_CLI unpause 2>&1); then
                     log_error "Failed to unpause block: $result"
                     exit 1
                 fi
                 ;;
             "cancel")
-                result=""
+                local result
                 if ! result=$($TASKMAN_CLI cancel 2>&1); then
                     log_error "Failed to cancel block: $result"
                     exit 1
@@ -146,7 +146,7 @@ restart
 copy-status
 copy-summary"
         
-        choice
+        local choice
         choice=$(show_menu "$options" "Block active")
         
         case "$choice" in
@@ -154,21 +154,21 @@ copy-summary"
                 handle_task_start
                 ;;
             "pause")
-                result=""
+                local result
                 if ! result=$($TASKMAN_CLI pause 2>&1); then
                     log_error "Failed to pause block: $result"
                     exit 1
                 fi
                 ;;
             "cancel")
-                result=""
+                local result
                 if ! result=$($TASKMAN_CLI cancel 2>&1); then
                     log_error "Failed to cancel block: $result"
                     exit 1
                 fi
                 ;;
             "restart")
-                result=""
+                local result
                 if ! result=$($TASKMAN_CLI restart 2>&1); then
                     log_error "Failed to restart block: $result"
                     exit 1
@@ -178,7 +178,7 @@ copy-summary"
                 copy_to_clipboard "$status_output"
                 ;;
             "copy-summary")
-                summary_output=""
+                local summary_output
                 if ! summary_output=$($TASKMAN_CLI summary 2>&1); then
                     log_error "Failed to get summary: $summary_output"
                     exit 1
