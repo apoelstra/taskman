@@ -161,9 +161,8 @@ is_block_paused() {
 # Function to calculate task durations and aggregate data
 calculate_task_data() {
     local block_data="$1"
-    local is_active="${2:-false}"
     
-    echo "$block_data" | jq --argjson is_active "$is_active" '
+    echo "$block_data" | jq '
         def calculate_duration(start; next_start; block_end; pauses; is_active):
             if next_start then
                 (next_start | fromdateiso8601) - (start | fromdateiso8601)
@@ -185,6 +184,8 @@ calculate_task_data() {
             ) | add // 0;
         
         . as $block |
+        (.duration - (now - (.start_time | fromdateiso8601))) as $remaining_time |
+        ($remaining_time > 0) as $is_active |
         .tasks |= (
             to_entries | map(
                 .value as $task |
@@ -290,18 +291,20 @@ cmd_summary() {
         
         # Calculate task data
         local block_with_calcs
-        block_with_calcs=$(calculate_task_data "$json_part" "$is_active")
+        block_with_calcs=$(calculate_task_data "$json_part")
         
         # Add metadata and calculate current time
         local block_info
-        block_info=$(echo "$block_with_calcs" | jq --arg change_id "$change_id" --arg block_number "$block_number" --arg date "$date" --argjson is_active "$is_active" '
+        block_info=$(echo "$block_with_calcs" | jq --arg change_id "$change_id" --arg block_number "$block_number" --arg date "$date" '
+            (.duration - (now - (.start_time | fromdateiso8601))) as $remaining_time |
+            ($remaining_time > 0) as $is_active |
             . + {
                 change_id: $change_id,
                 block_number: ($block_number | tonumber),
                 date: $date,
                 active: $is_active,
                 paused: ([.pauses[]? | select(.end_time == null)] | length > 0),
-                time_remaining: (if $is_active then (.duration - (now - (.start_time | fromdateiso8601))) else 0 end),
+                time_remaining: (if $is_active then $remaining_time else 0 end),
                 current_time: ([(now - (.start_time | fromdateiso8601)), .duration] | min),
                 active_task: (if $is_active and (.tasks | length > 0) then .tasks[-1] else null end)
             }
