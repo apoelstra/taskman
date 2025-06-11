@@ -141,7 +141,7 @@ def format_output():
                 # Still in cooldown - show remaining cooldown time in yellow
                 cooldown_remaining = cooldown_duration - cooldown_elapsed
                 remaining_formatted = format_duration(cooldown_remaining)
-                remaining_color = "#FF8"  # Always yellow during cooldown
+                remaining_color = "#000,#FF0"  # Always yellow during cooldown
                 task_text = " | [cooldown]"
             else:
                 # Cooldown finished
