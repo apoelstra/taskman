@@ -83,7 +83,16 @@ fi
 # Parse status to determine current state
 current_block=$(echo "$status_output" | jq -r '.blocks[0] // null')
 
-if [[ "$current_block" == "null" ]]; then
+# Check if block is truly active (exists AND has remaining time > 0)
+is_block_active=false
+if [[ "$current_block" != "null" ]]; then
+    remaining_time=$(echo "$current_block" | jq -r '.time_remaining // 0')
+    if (( $(echo "$remaining_time > 0" | bc -l) )); then
+        is_block_active=true
+    fi
+fi
+
+if [[ "$is_block_active" == "false" ]]; then
     # No active block
     options="start
 copy-status
@@ -112,7 +121,7 @@ copy-summary"
             ;;
     esac
 else
-    # Active block exists
+    # Active block exists (has remaining time > 0)
     is_paused=$(echo "$current_block" | jq -r '.paused')
     
     if [[ "$is_paused" == "true" ]]; then
