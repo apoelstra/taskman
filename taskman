@@ -231,7 +231,7 @@ cmd_summary() {
         # Calculate task data
         local block_with_calcs=$(calculate_task_data "$json_part")
         
-        # Add metadata
+        # Add metadata and calculate current time
         local block_info=$(echo "$block_with_calcs" | jq --arg commit_id "$commit_id" --arg block_number "$block_number" --arg date "$date" '
             . + {
                 commit_id: $commit_id,
@@ -239,27 +239,30 @@ cmd_summary() {
                 date: $date,
                 active: true,
                 paused: (.pauses[]? | select(.end_time == null)) != null,
-                time_remaining: (.duration - (now - (.start_time | fromdateiso8601)))
+                time_remaining: (.duration - (now - (.start_time | fromdateiso8601))),
+                current_time: (now - (.start_time | fromdateiso8601))
             }
         ')
         
         commits_data=$(echo "$commits_data" | jq --argjson block "$block_info" '. + [$block]')
     done < <(jj log --no-graph --template 'commit_id ++ "|" ++ description' -r "$revset" 2>/dev/null || echo "")
     
-    # Calculate aggregates
+    # Calculate aggregates including current time for active blocks
     local aggregated_tasks=$(aggregate_tasks "{\"blocks\": $commits_data}")
     local total_blocks=$(echo "$commits_data" | jq 'length')
     local total_time=$(echo "$commits_data" | jq '[.[].duration] | add // 0')
     local total_pause_time=$(echo "$commits_data" | jq '[.[].total_pause_time] | add // 0')
+    local total_current_time=$(echo "$commits_data" | jq '[.[].current_time // 0] | add // 0')
     local total_active_time=$((total_time - total_pause_time))
     
-    jq -n --argjson blocks "$commits_data" --argjson tasks "$aggregated_tasks" --argjson total_blocks "$total_blocks" --argjson total_time "$total_time" --argjson total_active_time "$total_active_time" --argjson total_pause_time "$total_pause_time" '{
+    jq -n --argjson blocks "$commits_data" --argjson tasks "$aggregated_tasks" --argjson total_blocks "$total_blocks" --argjson total_time "$total_time" --argjson total_active_time "$total_active_time" --argjson total_pause_time "$total_pause_time" --argjson total_current_time "$total_current_time" '{
         blocks: $blocks,
         aggregate: {
             total_blocks: $total_blocks,
             total_time: $total_time,
             total_active_time: $total_active_time,
             total_pause_time: $total_pause_time,
+            total_current_time: $total_current_time,
             tasks: $tasks
         }
     }'
@@ -293,11 +296,11 @@ cmd_start() {
     local block_number=$(get_next_block_number "$repo_path" "$local_date")
     local start_time=$(get_utc_timestamp)
     
-    # Create block data
+    # Create block data with default task
     local block_data=$(jq -n --arg start_time "$start_time" --argjson duration "$block_duration" '{
         start_time: $start_time,
         duration: $duration,
-        tasks: [],
+        tasks: [{description: "(no task set)", start_time: $start_time}],
         pauses: []
     }')
     
