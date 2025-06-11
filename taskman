@@ -225,7 +225,7 @@ cmd_summary() {
     # Get commits matching revset
     local commits_data="[]"
     local jj_output
-    jj_output=$(jj log --no-graph --template 'commit_id ++ "|" ++ description' -r "$revset" 2>/dev/null || echo "")
+    jj_output=$(jj log --no-graph --template 'change_id ++ "|" ++ description' -r "$revset" 2>/dev/null || echo "")
     
     while IFS= read -r line; do
         if [[ -z "$line" ]]; then continue; fi
@@ -258,9 +258,9 @@ cmd_summary() {
         
         # Add metadata and calculate current time
         local block_info
-        block_info=$(echo "$block_with_calcs" | jq --arg commit_id "$commit_id" --arg block_number "$block_number" --arg date "$date" '
+        block_info=$(echo "$block_with_calcs" | jq --arg change_id "$commit_id" --arg block_number "$block_number" --arg date "$date" '
             . + {
-                commit_id: $commit_id,
+                change_id: $change_id,
                 block_number: ($block_number | tonumber),
                 date: $date,
                 active: true,
