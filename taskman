@@ -224,6 +224,9 @@ cmd_summary() {
     
     # Get commits matching revset
     local commits_data="[]"
+    local jj_output
+    jj_output=$(jj log --no-graph --template 'commit_id ++ "|" ++ description' -r "$revset" 2>/dev/null || echo "")
+    
     while IFS= read -r line; do
         if [[ -z "$line" ]]; then continue; fi
         
@@ -268,7 +271,7 @@ cmd_summary() {
         ')
         
         commits_data=$(echo "$commits_data" | jq --argjson block "$block_info" '. + [$block]')
-    done < <(jj log --no-graph --template 'commit_id ++ "|" ++ description' -r "$revset" 2>/dev/null || echo "")
+    done <<< "$jj_output"
     
     # Calculate aggregates including current time for active blocks
     local aggregated_tasks
