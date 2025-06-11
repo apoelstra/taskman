@@ -39,10 +39,14 @@ copy_to_clipboard() {
 handle_task_start() {
     # Get summary for autocomplete options
     local summary_output
-    if ! summary_output=$($TASKMAN_CLI summary 2>&1); then
-        log_error "Failed to get summary for task autocomplete: $summary_output"
+    local summary_stderr
+    if ! summary_output=$($TASKMAN_CLI summary 2>/tmp/taskman_summary_error.$$); then
+        summary_stderr=$(cat /tmp/taskman_summary_error.$$ 2>/dev/null || echo "No error details available")
+        rm -f /tmp/taskman_summary_error.$$
+        log_error "Failed to get summary for task autocomplete: $summary_stderr"
         return 1
     fi
+    rm -f /tmp/taskman_summary_error.$$
     
     # Get existing task descriptions
     local existing_tasks
