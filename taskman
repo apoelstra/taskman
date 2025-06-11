@@ -4,12 +4,7 @@ set -euo pipefail
 set -x
 
 # Default configuration
-DEFAULT_CONFIG='{
-  "block_duration": 1500,
-  "repo_path": "$HOME/code/taskman-blocks",
-  "summary_revset": "all() & committers(after:\"7 days ago\")",
-  "timezone": "local"
-}'
+DEFAULT_CONFIG='{"block_duration": 1500, "repo_path": "$HOME/code/taskman-blocks", "summary_revset": "all() & committers(after:\"7 days ago\")", "timezone": "local"}'
 
 CONFIG_DIR="$HOME/.config/taskman"
 CONFIG_FILE="$CONFIG_DIR/config.json"
@@ -26,14 +21,14 @@ log_error() {
 
 # Function to output JSON error
 json_error() {
-    echo "{\"error\": \"$1\"}"
+    echo "{\"error\": \"$1\"}" >&2
     exit 1
 }
 
 # Function to load configuration
 load_config() {
     if [[ ! -f "$CONFIG_FILE" ]]; then
-        json_error "Configuration file not found at $CONFIG_FILE. Please create it with default values: $DEFAULT_CONFIG"
+        json_error "Configuration file not found at $CONFIG_FILE. Please create it with: echo '$DEFAULT_CONFIG' > $CONFIG_FILE"
     fi
     
     if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
@@ -198,7 +193,8 @@ aggregate_tasks() {
 cmd_summary() {
     local revset="${1:-}"
     local config=$(load_config)
-    local repo_path=$(expand_path "$(echo "$config" | jq -r '.repo_path')")
+    local repo_path_raw=$(echo "$config" | jq -r '.repo_path')
+    local repo_path=$(expand_path "$repo_path_raw")
     
     if [[ -z "$revset" ]]; then
         revset=$(echo "$config" | jq -r '.summary_revset')
@@ -272,7 +268,8 @@ cmd_summary() {
 
 cmd_start() {
     local config=$(load_config)
-    local repo_path=$(expand_path "$(echo "$config" | jq -r '.repo_path')")
+    local repo_path_raw=$(echo "$config" | jq -r '.repo_path')
+    local repo_path=$(expand_path "$repo_path_raw")
     local block_duration=$(echo "$config" | jq -r '.block_duration')
     
     if [[ ! -d "$repo_path" ]]; then
@@ -320,7 +317,8 @@ $block_data"
 
 cmd_pause() {
     local config=$(load_config)
-    local repo_path=$(expand_path "$(echo "$config" | jq -r '.repo_path')")
+    local repo_path_raw=$(echo "$config" | jq -r '.repo_path')
+    local repo_path=$(expand_path "$repo_path_raw")
     
     cd "$repo_path"
     
@@ -353,7 +351,8 @@ $updated_block"
 
 cmd_unpause() {
     local config=$(load_config)
-    local repo_path=$(expand_path "$(echo "$config" | jq -r '.repo_path')")
+    local repo_path_raw=$(echo "$config" | jq -r '.repo_path')
+    local repo_path=$(expand_path "$repo_path_raw")
     
     cd "$repo_path"
     
@@ -394,7 +393,8 @@ $updated_block"
 
 cmd_cancel() {
     local config=$(load_config)
-    local repo_path=$(expand_path "$(echo "$config" | jq -r '.repo_path')")
+    local repo_path_raw=$(echo "$config" | jq -r '.repo_path')
+    local repo_path=$(expand_path "$repo_path_raw")
     
     cd "$repo_path"
     
@@ -422,7 +422,8 @@ cmd_status() {
 cmd_task_start() {
     local description="$1"
     local config=$(load_config)
-    local repo_path=$(expand_path "$(echo "$config" | jq -r '.repo_path')")
+    local repo_path_raw=$(echo "$config" | jq -r '.repo_path')
+    local repo_path=$(expand_path "$repo_path_raw")
     
     cd "$repo_path"
     
