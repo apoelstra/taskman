@@ -40,11 +40,11 @@ def get_remaining_time_color(remaining_time, total_duration, should_flash=False)
         return "#F88"  # Orange/red for little time
 
 
-def truncate_task(task_description, max_length=20):
+def truncate_task(task_description, max_length=30):
     """Truncate task description to max_length, adding ... if needed"""
     if len(task_description) <= max_length:
         return task_description
-    return task_description[:17] + "..."
+    return task_description[:max_length - 3] + "..."
 
 
 def get_taskman_data():
@@ -144,11 +144,11 @@ def format_output():
                 remaining_color = "#000,#FF0"  # Always yellow during cooldown
                 task_text = " | [cooldown]"
             else:
-                # Cooldown finished
-                cooldown_start_time = None
+                # Cooldown finished - stay at 0 until next block starts
                 remaining_formatted = format_duration(0)
                 remaining_color = "#AAA"
                 task_text = ""
+                # Don't reset cooldown_start_time - keep it to prevent restarting cooldown
         else:
             # No active block and no cooldown
             remaining_formatted = format_duration(0)
