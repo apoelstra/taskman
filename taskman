@@ -225,6 +225,15 @@ cmd_summary() {
     # Get commits matching revset
     local commits_data="[]"
     
+    # Get list of change IDs first to debug
+    local change_ids_output
+    change_ids_output=$(jj log --no-graph --template 'change_id' -r "$revset" 2>&1)
+    local jj_exit_code=$?
+    
+    if [[ $jj_exit_code -ne 0 ]]; then
+        json_error "jj log failed: $change_ids_output"
+    fi
+    
     # Process each commit individually to handle multi-line descriptions properly
     while IFS= read -r change_id; do
         if [[ -z "$change_id" ]]; then continue; fi
@@ -271,7 +280,7 @@ cmd_summary() {
         ')
         
         commits_data=$(echo "$commits_data" | jq --argjson block "$block_info" '. + [$block]')
-    done < <(jj log --no-graph --template 'change_id' -r "$revset" 2>/dev/null || echo "")
+    done <<< "$change_ids_output"
     
     # Calculate aggregates including current time for active blocks
     local aggregated_tasks
