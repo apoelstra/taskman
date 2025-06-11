@@ -126,10 +126,12 @@ get_active_block() {
         return
     fi
     
-    # Check if block has expired (current time > start_time + duration)
+    # Check if block has expired (remaining time <= 0)
+    local remaining_time
+    remaining_time=$(echo "$json_part" | jq '.duration - (now - (.start_time | fromdateiso8601))')
     local is_expired
-    is_expired=$(echo "$json_part" | jq 'now > ((.start_time | fromdateiso8601) + .duration)')
-    if [[ "$is_expired" == "true" ]]; then
+    is_expired=$(echo "$remaining_time <= 0" | bc -l)
+    if [[ "$is_expired" == "1" ]]; then
         echo "null"
         return
     fi
