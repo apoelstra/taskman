@@ -1,0 +1,487 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Default configuration
+DEFAULT_CONFIG='{
+  "block_duration": 1500,
+  "repo_path": "$HOME/code/taskman-blocks",
+  "summary_revset": "all() & committers(after:\"7 days ago\")",
+  "timezone": "local"
+}'
+
+CONFIG_DIR="$HOME/.config/taskman"
+CONFIG_FILE="$CONFIG_DIR/config.json"
+ERROR_LOG="$CONFIG_DIR/errors.log"
+
+# Ensure config directory exists
+mkdir -p "$CONFIG_DIR"
+
+# Function to log errors
+log_error() {
+    local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
+    echo "[$timestamp] ERROR: $1" >> "$ERROR_LOG"
+}
+
+# Function to output JSON error
+json_error() {
+    echo "{\"error\": \"$1\"}"
+    exit 1
+}
+
+# Function to load configuration
+load_config() {
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        json_error "Configuration file not found at $CONFIG_FILE. Please create it with default values: $DEFAULT_CONFIG"
+    fi
+    
+    if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
+        json_error "Invalid JSON in configuration file: $CONFIG_FILE"
+    fi
+    
+    cat "$CONFIG_FILE"
+}
+
+# Function to expand path variables
+expand_path() {
+    local path="$1"
+    eval echo "$path"
+}
+
+# Function to get current timestamp in UTC
+get_utc_timestamp() {
+    date -u +"%Y-%m-%dT%H:%M:%S.%3NZ"
+}
+
+# Function to get local date for block numbering
+get_local_date() {
+    local config="$1"
+    local timezone=$(echo "$config" | jq -r '.timezone // "local"')
+    
+    if [[ "$timezone" == "local" ]]; then
+        date +"%Y-%m-%d"
+    else
+        TZ="$timezone" date +"%Y-%m-%d"
+    fi
+}
+
+# Function to get next block number for today
+get_next_block_number() {
+    local repo_path="$1"
+    local local_date="$2"
+    
+    cd "$repo_path"
+    
+    # Find all commits from today and extract block numbers
+    local max_block=0
+    while IFS= read -r commit_msg; do
+        if [[ "$commit_msg" =~ ^Block\ ([0-9]+)\ of\ $local_date$ ]]; then
+            local block_num="${BASH_REMATCH[1]}"
+            if (( block_num > max_block )); then
+                max_block=$block_num
+            fi
+        fi
+    done < <(jj log --no-graph --template 'description.first_line()' -r 'all()' 2>/dev/null || echo "")
+    
+    echo $((max_block + 1))
+}
+
+# Function to get current active block
+get_active_block() {
+    local repo_path="$1"
+    cd "$repo_path"
+    
+    # Get current commit description
+    local desc=$(jj log --no-graph --template 'description' -r '@' 2>/dev/null || echo "")
+    
+    if [[ -z "$desc" ]]; then
+        echo "null"
+        return
+    fi
+    
+    # Extract JSON from description (everything after the first blank line)
+    local json_part=$(echo "$desc" | sed -n '/^$/,$p' | tail -n +2)
+    
+    if [[ -z "$json_part" ]] || ! echo "$json_part" | jq empty 2>/dev/null; then
+        echo "null"
+        return
+    fi
+    
+    # Check if block is active (no end time and not abandoned)
+    local start_time=$(echo "$json_part" | jq -r '.start_time // empty')
+    if [[ -n "$start_time" ]]; then
+        echo "$json_part"
+    else
+        echo "null"
+    fi
+}
+
+# Function to check if block is paused
+is_block_paused() {
+    local block_data="$1"
+    
+    if [[ "$block_data" == "null" ]]; then
+        echo "false"
+        return
+    fi
+    
+    # Check if there's an active pause (pause with no end_time)
+    local active_pause=$(echo "$block_data" | jq '.pauses[]? | select(.end_time == null)')
+    if [[ -n "$active_pause" ]]; then
+        echo "true"
+    else
+        echo "false"
+    fi
+}
+
+# Function to calculate task durations and aggregate data
+calculate_task_data() {
+    local block_data="$1"
+    
+    echo "$block_data" | jq '
+        def calculate_duration(start; next_start; block_end; pauses):
+            if next_start then
+                (next_start | fromdateiso8601) - (start | fromdateiso8601)
+            else
+                (block_end | fromdateiso8601) - (start | fromdateiso8601)
+            end;
+        
+        def total_pause_time(pauses):
+            pauses | map(
+                if .end_time then
+                    (.end_time | fromdateiso8601) - (.start_time | fromdateiso8601)
+                else
+                    0
+                end
+            ) | add // 0;
+        
+        . as $block |
+        .tasks |= (
+            to_entries | map(
+                .value as $task |
+                .key as $idx |
+                $task + {
+                    total_duration: calculate_duration(
+                        $task.start_time;
+                        (if $block.tasks[$idx + 1] then $block.tasks[$idx + 1].start_time else null end);
+                        ($block.start_time | fromdateiso8601 + $block.duration | todateiso8601);
+                        $block.pauses
+                    ),
+                    switch_count: 1
+                }
+            ) | map(.value)
+        ) |
+        . + {
+            total_pause_time: total_pause_time(.pauses)
+        }
+    '
+}
+
+# Function to aggregate tasks across multiple blocks
+aggregate_tasks() {
+    local blocks_json="$1"
+    
+    echo "$blocks_json" | jq '
+        [.blocks[].tasks[]] | 
+        group_by(.description) |
+        map({
+            description: .[0].description,
+            total_duration: map(.total_duration) | add,
+            earliest_start: map(.start_time) | min,
+            switch_count: length
+        })
+    '
+}
+
+# Command implementations
+cmd_summary() {
+    local revset="${1:-}"
+    local config=$(load_config)
+    local repo_path=$(expand_path "$(echo "$config" | jq -r '.repo_path')")
+    
+    if [[ -z "$revset" ]]; then
+        revset=$(echo "$config" | jq -r '.summary_revset')
+    fi
+    
+    if [[ ! -d "$repo_path" ]]; then
+        json_error "Repository path does not exist: $repo_path"
+    fi
+    
+    cd "$repo_path"
+    
+    # Get commits matching revset
+    local commits_data="[]"
+    while IFS= read -r line; do
+        if [[ -z "$line" ]]; then continue; fi
+        
+        local commit_id=$(echo "$line" | cut -d'|' -f1)
+        local desc=$(echo "$line" | cut -d'|' -f2-)
+        
+        # Extract block info from first line
+        local first_line=$(echo "$desc" | head -n1)
+        if [[ ! "$first_line" =~ ^Block\ ([0-9]+)\ of\ ([0-9]{4}-[0-9]{2}-[0-9]{2})$ ]]; then
+            continue
+        fi
+        
+        local block_number="${BASH_REMATCH[1]}"
+        local date="${BASH_REMATCH[2]}"
+        
+        # Extract JSON from description
+        local json_part=$(echo "$desc" | sed -n '/^$/,$p' | tail -n +2)
+        if [[ -z "$json_part" ]] || ! echo "$json_part" | jq empty 2>/dev/null; then
+            continue
+        fi
+        
+        # Calculate task data
+        local block_with_calcs=$(calculate_task_data "$json_part")
+        
+        # Add metadata
+        local block_info=$(echo "$block_with_calcs" | jq --arg commit_id "$commit_id" --arg block_number "$block_number" --arg date "$date" '
+            . + {
+                commit_id: $commit_id,
+                block_number: ($block_number | tonumber),
+                date: $date,
+                active: true,
+                paused: (.pauses[]? | select(.end_time == null)) != null,
+                time_remaining: (.duration - (now - (.start_time | fromdateiso8601)))
+            }
+        ')
+        
+        commits_data=$(echo "$commits_data" | jq --argjson block "$block_info" '. + [$block]')
+    done < <(jj log --no-graph --template 'commit_id ++ "|" ++ description' -r "$revset" 2>/dev/null || echo "")
+    
+    # Calculate aggregates
+    local aggregated_tasks=$(aggregate_tasks "{\"blocks\": $commits_data}")
+    local total_blocks=$(echo "$commits_data" | jq 'length')
+    local total_time=$(echo "$commits_data" | jq '[.[].duration] | add // 0')
+    local total_pause_time=$(echo "$commits_data" | jq '[.[].total_pause_time] | add // 0')
+    local total_active_time=$((total_time - total_pause_time))
+    
+    jq -n --argjson blocks "$commits_data" --argjson tasks "$aggregated_tasks" --argjson total_blocks "$total_blocks" --argjson total_time "$total_time" --argjson total_active_time "$total_active_time" --argjson total_pause_time "$total_pause_time" '{
+        blocks: $blocks,
+        aggregate: {
+            total_blocks: $total_blocks,
+            total_time: $total_time,
+            total_active_time: $total_active_time,
+            total_pause_time: $total_pause_time,
+            tasks: $tasks
+        }
+    }'
+}
+
+cmd_start() {
+    local config=$(load_config)
+    local repo_path=$(expand_path "$(echo "$config" | jq -r '.repo_path')")
+    local block_duration=$(echo "$config" | jq -r '.block_duration')
+    
+    if [[ ! -d "$repo_path" ]]; then
+        json_error "Repository path does not exist: $repo_path"
+    fi
+    
+    cd "$repo_path"
+    
+    # Check if there's already an active block
+    local active_block=$(get_active_block "$repo_path")
+    if [[ "$active_block" != "null" ]]; then
+        json_error "A block is already active. Use 'cancel' or 'restart' first."
+    fi
+    
+    # Create new commit
+    if ! jj new >/dev/null 2>&1; then
+        json_error "Failed to create new commit"
+    fi
+    
+    # Get block number and date
+    local local_date=$(get_local_date "$config")
+    local block_number=$(get_next_block_number "$repo_path" "$local_date")
+    local start_time=$(get_utc_timestamp)
+    
+    # Create block data
+    local block_data=$(jq -n --arg start_time "$start_time" --argjson duration "$block_duration" '{
+        start_time: $start_time,
+        duration: $duration,
+        tasks: [],
+        pauses: []
+    }')
+    
+    # Create commit message
+    local commit_msg="Block $block_number of $local_date
+
+$block_data"
+    
+    # Set commit description
+    if ! echo "$commit_msg" | jj describe --stdin >/dev/null 2>&1; then
+        json_error "Failed to set commit description"
+    fi
+    
+    echo "$block_data"
+}
+
+cmd_pause() {
+    local config=$(load_config)
+    local repo_path=$(expand_path "$(echo "$config" | jq -r '.repo_path')")
+    
+    cd "$repo_path"
+    
+    local active_block=$(get_active_block "$repo_path")
+    if [[ "$active_block" == "null" ]]; then
+        json_error "No active block to pause"
+    fi
+    
+    local is_paused=$(is_block_paused "$active_block")
+    if [[ "$is_paused" == "true" ]]; then
+        json_error "Block is already paused"
+    fi
+    
+    # Add pause entry
+    local pause_time=$(get_utc_timestamp)
+    local updated_block=$(echo "$active_block" | jq --arg pause_time "$pause_time" '.pauses += [{start_time: $pause_time, end_time: null}]')
+    
+    # Get current commit message first line
+    local first_line=$(jj log --no-graph --template 'description.first_line()' -r '@' 2>/dev/null)
+    local commit_msg="$first_line
+
+$updated_block"
+    
+    if ! echo "$commit_msg" | jj describe --stdin >/dev/null 2>&1; then
+        json_error "Failed to update commit description"
+    fi
+    
+    echo "$updated_block"
+}
+
+cmd_unpause() {
+    local config=$(load_config)
+    local repo_path=$(expand_path "$(echo "$config" | jq -r '.repo_path')")
+    
+    cd "$repo_path"
+    
+    local active_block=$(get_active_block "$repo_path")
+    if [[ "$active_block" == "null" ]]; then
+        json_error "No active block to unpause"
+    fi
+    
+    local is_paused=$(is_block_paused "$active_block")
+    if [[ "$is_paused" == "false" ]]; then
+        json_error "Block is not paused"
+    fi
+    
+    # Set end time for most recent pause
+    local unpause_time=$(get_utc_timestamp)
+    local updated_block=$(echo "$active_block" | jq --arg unpause_time "$unpause_time" '
+        .pauses |= (to_entries | map(
+            if .key == (length - 1) and .value.end_time == null then
+                .value.end_time = $unpause_time
+            else
+                .value
+            end
+        ) | map(.value))
+    ')
+    
+    # Get current commit message first line
+    local first_line=$(jj log --no-graph --template 'description.first_line()' -r '@' 2>/dev/null)
+    local commit_msg="$first_line
+
+$updated_block"
+    
+    if ! echo "$commit_msg" | jj describe --stdin >/dev/null 2>&1; then
+        json_error "Failed to update commit description"
+    fi
+    
+    echo "$updated_block"
+}
+
+cmd_cancel() {
+    local config=$(load_config)
+    local repo_path=$(expand_path "$(echo "$config" | jq -r '.repo_path')")
+    
+    cd "$repo_path"
+    
+    local active_block=$(get_active_block "$repo_path")
+    if [[ "$active_block" == "null" ]]; then
+        json_error "No active block to cancel"
+    fi
+    
+    if ! jj abandon @ >/dev/null 2>&1; then
+        json_error "Failed to abandon current commit"
+    fi
+    
+    echo '{"success": true}'
+}
+
+cmd_restart() {
+    cmd_cancel >/dev/null
+    cmd_start
+}
+
+cmd_status() {
+    cmd_summary "@"
+}
+
+cmd_task_start() {
+    local description="$1"
+    local config=$(load_config)
+    local repo_path=$(expand_path "$(echo "$config" | jq -r '.repo_path')")
+    
+    cd "$repo_path"
+    
+    local active_block=$(get_active_block "$repo_path")
+    if [[ "$active_block" == "null" ]]; then
+        json_error "No active block. Start a block first."
+    fi
+    
+    local is_paused=$(is_block_paused "$active_block")
+    if [[ "$is_paused" == "true" ]]; then
+        json_error "Block is paused. Unpause first."
+    fi
+    
+    # Add new task
+    local task_start_time=$(get_utc_timestamp)
+    local updated_block=$(echo "$active_block" | jq --arg desc "$description" --arg start_time "$task_start_time" '.tasks += [{description: $desc, start_time: $start_time}]')
+    
+    # Get current commit message first line
+    local first_line=$(jj log --no-graph --template 'description.first_line()' -r '@' 2>/dev/null)
+    local commit_msg="$first_line
+
+$updated_block"
+    
+    if ! echo "$commit_msg" | jj describe --stdin >/dev/null 2>&1; then
+        json_error "Failed to update commit description"
+    fi
+    
+    echo "$updated_block"
+}
+
+# Main command dispatch
+case "${1:-}" in
+    summary)
+        cmd_summary "${2:-}"
+        ;;
+    start)
+        cmd_start
+        ;;
+    pause)
+        cmd_pause
+        ;;
+    unpause)
+        cmd_unpause
+        ;;
+    cancel)
+        cmd_cancel
+        ;;
+    restart)
+        cmd_restart
+        ;;
+    status)
+        cmd_status
+        ;;
+    task-start)
+        if [[ $# -lt 2 ]]; then
+            json_error "task-start requires a description argument"
+        fi
+        cmd_task_start "$2"
+        ;;
+    *)
+        json_error "Unknown command: ${1:-}. Available commands: summary, start, pause, unpause, cancel, restart, status, task-start"
+        ;;
+esac

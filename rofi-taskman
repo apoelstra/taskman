@@ -1,0 +1,175 @@
+#!/bin/bash
+
+set -euo pipefail
+
+TASKMAN_CLI="taskman"
+CONFIG_DIR="$HOME/.config/taskman"
+ERROR_LOG="$CONFIG_DIR/errors.log"
+
+# Ensure config directory exists
+mkdir -p "$CONFIG_DIR"
+
+# Function to log errors
+log_error() {
+    local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
+    echo "[$timestamp] ERROR: $1" >> "$ERROR_LOG"
+}
+
+# Function to show rofi menu
+show_menu() {
+    local options="$1"
+    local prompt="${2:-Select action}"
+    echo "$options" | rofi -dmenu -p "$prompt" -i
+}
+
+# Function to get unique task descriptions from summary
+get_task_descriptions() {
+    local summary_json="$1"
+    echo "$summary_json" | jq -r '.aggregate.tasks[]?.description // empty' | sort -u
+}
+
+# Function to copy to clipboard
+copy_to_clipboard() {
+    local content="$1"
+    echo "$content" | xsel -b
+}
+
+# Function to handle task start with autocomplete
+handle_task_start() {
+    # Get summary for autocomplete options
+    local summary_output
+    if ! summary_output=$($TASKMAN_CLI summary 2>&1); then
+        log_error "Failed to get summary for task autocomplete: $summary_output"
+        return 1
+    fi
+    
+    # Get existing task descriptions
+    local existing_tasks=$(get_task_descriptions "$summary_output")
+    
+    # Show rofi with existing tasks as options, but allow custom input
+    local task_description
+    if [[ -n "$existing_tasks" ]]; then
+        task_description=$(echo "$existing_tasks" | rofi -dmenu -p "Task description" -i)
+    else
+        task_description=$(echo "" | rofi -dmenu -p "Task description" -i)
+    fi
+    
+    if [[ -n "$task_description" ]]; then
+        local result
+        if ! result=$($TASKMAN_CLI task-start "$task_description" 2>&1); then
+            log_error "Failed to start task: $result"
+            return 1
+        fi
+    fi
+}
+
+# Get current status
+status_output=$($TASKMAN_CLI status 2>&1) || {
+    log_error "Failed to get status: $status_output"
+    exit 1
+}
+
+# Parse status to determine current state
+current_block=$(echo "$status_output" | jq -r '.blocks[0] // null')
+
+if [[ "$current_block" == "null" ]]; then
+    # No active block
+    options="start
+copy-status
+copy-summary"
+    
+    choice=$(show_menu "$options" "No active block")
+    
+    case "$choice" in
+        "start")
+            result=$($TASKMAN_CLI start 2>&1) || {
+                log_error "Failed to start block: $result"
+                exit 1
+            }
+            ;;
+        "copy-status")
+            copy_to_clipboard "$status_output"
+            ;;
+        "copy-summary")
+            summary_output=$($TASKMAN_CLI summary 2>&1) || {
+                log_error "Failed to get summary: $summary_output"
+                exit 1
+            }
+            copy_to_clipboard "$summary_output"
+            ;;
+    esac
+else
+    # Active block exists
+    is_paused=$(echo "$current_block" | jq -r '.paused')
+    
+    if [[ "$is_paused" == "true" ]]; then
+        # Block is paused
+        options="unpause
+cancel
+copy-status"
+        
+        choice=$(show_menu "$options" "Block paused")
+        
+        case "$choice" in
+            "unpause")
+                result=$($TASKMAN_CLI unpause 2>&1) || {
+                    log_error "Failed to unpause block: $result"
+                    exit 1
+                }
+                ;;
+            "cancel")
+                result=$($TASKMAN_CLI cancel 2>&1) || {
+                    log_error "Failed to cancel block: $result"
+                    exit 1
+                }
+                ;;
+            "copy-status")
+                copy_to_clipboard "$status_output"
+                ;;
+        esac
+    else
+        # Block is active and not paused
+        options="task-start
+pause
+cancel
+restart
+copy-status
+copy-summary"
+        
+        choice=$(show_menu "$options" "Block active")
+        
+        case "$choice" in
+            "task-start")
+                handle_task_start
+                ;;
+            "pause")
+                result=$($TASKMAN_CLI pause 2>&1) || {
+                    log_error "Failed to pause block: $result"
+                    exit 1
+                }
+                ;;
+            "cancel")
+                result=$($TASKMAN_CLI cancel 2>&1) || {
+                    log_error "Failed to cancel block: $result"
+                    exit 1
+                }
+                ;;
+            "restart")
+                result=$($TASKMAN_CLI restart 2>&1) || {
+                    log_error "Failed to restart block: $result"
+                    exit 1
+                }
+                ;;
+            "copy-status")
+                copy_to_clipboard "$status_output"
+                ;;
+            "copy-summary")
+                summary_output=$($TASKMAN_CLI summary 2>&1) || {
+                    log_error "Failed to get summary: $summary_output"
+                    exit 1
+                }
+                copy_to_clipboard "$summary_output"
+                ;;
+        esac
+    fi
+fi
