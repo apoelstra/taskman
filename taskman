@@ -224,18 +224,18 @@ cmd_summary() {
     
     # Get commits matching revset
     local commits_data="[]"
-    local jj_output
-    jj_output=$(jj log --no-graph --template 'change_id ++ "|" ++ description' -r "$revset" 2>/dev/null || echo "")
     
-    while IFS= read -r line; do
-        if [[ -z "$line" ]]; then continue; fi
+    # Process each commit individually to handle multi-line descriptions properly
+    while IFS= read -r change_id; do
+        if [[ -z "$change_id" ]]; then continue; fi
         
-        local commit_id
-        commit_id=$(echo "$line" | cut -d'|' -f1)
+        # Get the full description for this specific commit
         local desc
-        desc=$(echo "$line" | cut -d'|' -f2-)
+        desc=$(jj log --no-graph --template 'description' -r "$change_id" 2>/dev/null || echo "")
         
-        # Extract block info from first line
+        if [[ -z "$desc" ]]; then continue; fi
+        
+        # Extract block info from first line of description
         local first_line
         first_line=$(echo "$desc" | head -n1)
         if [[ ! "$first_line" =~ ^Block\ ([0-9]+)\ of\ ([0-9]{4}-[0-9]{2}-[0-9]{2})$ ]]; then
@@ -245,7 +245,7 @@ cmd_summary() {
         local block_number="${BASH_REMATCH[1]}"
         local date="${BASH_REMATCH[2]}"
         
-        # Extract JSON from description
+        # Extract JSON from description (everything after the first blank line)
         local json_part
         json_part=$(echo "$desc" | sed -n '/^$/,$p' | tail -n +2)
         if [[ -z "$json_part" ]] || ! echo "$json_part" | jq empty 2>/dev/null; then
@@ -258,7 +258,7 @@ cmd_summary() {
         
         # Add metadata and calculate current time
         local block_info
-        block_info=$(echo "$block_with_calcs" | jq --arg change_id "$commit_id" --arg block_number "$block_number" --arg date "$date" '
+        block_info=$(echo "$block_with_calcs" | jq --arg change_id "$change_id" --arg block_number "$block_number" --arg date "$date" '
             . + {
                 change_id: $change_id,
                 block_number: ($block_number | tonumber),
@@ -271,7 +271,7 @@ cmd_summary() {
         ')
         
         commits_data=$(echo "$commits_data" | jq --argjson block "$block_info" '. + [$block]')
-    done <<< "$jj_output"
+    done < <(jj log --no-graph --template 'change_id' -r "$revset" 2>/dev/null || echo "")
     
     # Calculate aggregates including current time for active blocks
     local aggregated_tasks
