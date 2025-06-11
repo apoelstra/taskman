@@ -300,7 +300,7 @@ cmd_summary() {
                 active: $is_active,
                 paused: ([.pauses[]? | select(.end_time == null)] | length > 0),
                 time_remaining: (if $is_active then (.duration - (now - (.start_time | fromdateiso8601))) else 0 end),
-                current_time: (now - (.start_time | fromdateiso8601)),
+                current_time: ([(now - (.start_time | fromdateiso8601)), .duration] | min),
                 active_task: (if $is_active and (.tasks | length > 0) then .tasks[-1] else null end)
             }
         ')
