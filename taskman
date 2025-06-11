@@ -181,8 +181,7 @@ calculate_task_data() {
                         ($block.start_time | fromdateiso8601 + $block.duration | todateiso8601);
                         $block.pauses;
                         $is_active
-                    ),
-                    switch_count: 1
+                    )
                 }
             )
         ) |
