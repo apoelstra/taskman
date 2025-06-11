@@ -72,6 +72,9 @@ get_next_block_number() {
     # Find all commits from today and extract block numbers
     local max_block=0
     while IFS= read -r commit_msg; do
+        # Skip empty lines
+        if [[ -z "$commit_msg" ]]; then continue; fi
+        
         if [[ "$commit_msg" =~ ^Block\ ([0-9]+)\ of\ $local_date$ ]]; then
             local block_num="${BASH_REMATCH[1]}"
             if (( block_num > max_block )); then
@@ -92,7 +95,8 @@ get_active_block() {
     local desc
     desc=$(jj log --no-graph --template 'description' -r '@' 2>/dev/null || echo "")
     
-    if [[ -z "$desc" ]]; then
+    # Handle empty or whitespace-only descriptions
+    if [[ -z "$desc" ]] || [[ "$desc" =~ ^[[:space:]]*$ ]]; then
         echo "null"
         return
     fi
@@ -256,7 +260,8 @@ cmd_summary() {
         local desc
         desc=$(jj log --no-graph --template 'description' -r "$change_id" 2>/dev/null || echo "")
         
-        if [[ -z "$desc" ]]; then continue; fi
+        # Handle empty or whitespace-only descriptions
+        if [[ -z "$desc" ]] || [[ "$desc" =~ ^[[:space:]]*$ ]]; then continue; fi
         
         # Extract block info from first line of description
         local first_line
