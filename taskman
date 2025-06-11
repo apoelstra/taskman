@@ -273,7 +273,7 @@ cmd_summary() {
                 block_number: ($block_number | tonumber),
                 date: $date,
                 active: true,
-                paused: (.pauses[]? | select(.end_time == null)) != null,
+                paused: ([.pauses[]? | select(.end_time == null)] | length > 0),
                 time_remaining: (.duration - (now - (.start_time | fromdateiso8601))),
                 current_time: (now - (.start_time | fromdateiso8601))
             }
