@@ -146,13 +146,18 @@ is_block_paused() {
 # Function to calculate task durations and aggregate data
 calculate_task_data() {
     local block_data="$1"
+    local is_active="${2:-false}"
     
-    echo "$block_data" | jq '
-        def calculate_duration(start; next_start; block_end; pauses):
+    echo "$block_data" | jq --argjson is_active "$is_active" '
+        def calculate_duration(start; next_start; block_end; pauses; is_active):
             if next_start then
                 (next_start | fromdateiso8601) - (start | fromdateiso8601)
             else
-                (block_end | fromdateiso8601) - (start | fromdateiso8601)
+                if is_active then
+                    now - (start | fromdateiso8601)
+                else
+                    (block_end | fromdateiso8601) - (start | fromdateiso8601)
+                end
             end;
         
         def total_pause_time(pauses):
@@ -174,7 +179,8 @@ calculate_task_data() {
                         $task.start_time;
                         (if $block.tasks[$idx + 1] then $block.tasks[$idx + 1].start_time else null end);
                         ($block.start_time | fromdateiso8601 + $block.duration | todateiso8601);
-                        $block.pauses
+                        $block.pauses;
+                        $is_active
                     ),
                     switch_count: 1
                 }
@@ -261,21 +267,28 @@ cmd_summary() {
             continue
         fi
         
+        # Determine if this is the current active block (revset is "@")
+        local is_active="false"
+        if [[ "$revset" == "@" ]]; then
+            is_active="true"
+        fi
+        
         # Calculate task data
         local block_with_calcs
-        block_with_calcs=$(calculate_task_data "$json_part")
+        block_with_calcs=$(calculate_task_data "$json_part" "$is_active")
         
         # Add metadata and calculate current time
         local block_info
-        block_info=$(echo "$block_with_calcs" | jq --arg change_id "$change_id" --arg block_number "$block_number" --arg date "$date" '
+        block_info=$(echo "$block_with_calcs" | jq --arg change_id "$change_id" --arg block_number "$block_number" --arg date "$date" --argjson is_active "$is_active" '
             . + {
                 change_id: $change_id,
                 block_number: ($block_number | tonumber),
                 date: $date,
-                active: true,
+                active: $is_active,
                 paused: ([.pauses[]? | select(.end_time == null)] | length > 0),
                 time_remaining: (.duration - (now - (.start_time | fromdateiso8601))),
-                current_time: (now - (.start_time | fromdateiso8601))
+                current_time: (now - (.start_time | fromdateiso8601)),
+                active_task: (if $is_active and (.tasks | length > 0) then .tasks[-1] else null end)
             }
         ')
         
