@@ -78,10 +78,10 @@ def get_taskman_data():
 def format_output():
     """Format the xmobar output"""
     global cooldown_start_time, flash_state, update_counter
-    
+
     status_data, summary_data = get_taskman_data()
     current_time = time.time()
-    
+
     # Update flash state every other update (every 0.5 seconds)
     update_counter += 1
     if update_counter % 2 == 0:
@@ -100,7 +100,7 @@ def format_output():
     if current_block and current_block.get("active", False):
         # Active block exists - reset cooldown
         cooldown_start_time = None
-        
+
         remaining_time = current_block.get("time_remaining", 0)
         total_duration = current_block.get("duration", 1500)
         is_paused = current_block.get("paused", False)
@@ -131,12 +131,12 @@ def format_output():
             # Block just expired, start cooldown if not already started
             if cooldown_start_time is None:
                 cooldown_start_time = current_time
-        
+
         # Check if we're in cooldown period
         if cooldown_start_time is not None:
             cooldown_elapsed = current_time - cooldown_start_time
             cooldown_duration = 8 * 60  # 8 minutes in seconds
-            
+
             if cooldown_elapsed < cooldown_duration:
                 # Still in cooldown - show remaining cooldown time in yellow
                 cooldown_remaining = cooldown_duration - cooldown_elapsed
